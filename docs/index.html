@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Perceptual Audio Codec — hear what the ear throws away</title>
+<meta name="description" content="A from-scratch perceptual audio codec (MDCT + psychoacoustic masking) running live in your browser. Drop in your own audio and watch the bit allocator decide what you can't hear.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="scanline-overlay" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">◈</span>
+      <span class="brand-text">PERCEPTUAL<span class="brand-thin">/AUDIO/CODEC</span></span>
+    </div>
+    <a class="repo-link" href="https://github.com/Abhigyanv23/Perceptual-Audio-Codec" target="_blank" rel="noopener">
+      view source
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M17 7H7M17 7V17"/></svg>
+    </a>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">a codec that decides what you can't hear</p>
+      <h1>Most of every song<br>is <span class="hl">inaudible</span>.</h1>
+      <p class="hero-sub">
+        This is a lossy audio codec built from first principles — the same core idea behind
+        MP3 and AAC. It transforms your audio into frequency bands, models which of those
+        bands your ear can't actually perceive because a louder neighbor is masking them,
+        and spends its bit budget only on what remains. Drop a clip below and watch it work.
+      </p>
+    </div>
+  </section>
+
+  <section class="lab" id="lab">
+    <div class="lab-inner">
+
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload an audio file">
+        <input type="file" id="fileInput" accept="audio/*" hidden>
+        <div class="dropzone-content" id="dropzoneContent">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M12 4l-5 5M12 4l5 5"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
+          <p><strong>Drop an audio file</strong> or click to browse</p>
+          <p class="dropzone-hint">WAV, MP3, or anything your browser can decode · first 15s used for the live demo</p>
+        </div>
+        <div class="dropzone-file" id="dropzoneFile" hidden>
+          <span class="file-name" id="fileName"></span>
+          <button class="file-change" id="fileChangeBtn" type="button">change file</button>
+        </div>
+      </div>
+
+      <div class="controls" id="controls" hidden>
+        <div class="control">
+          <div class="control-label">
+            <span>target bitrate</span>
+            <span class="control-value mono" id="kbpsValue">128 kbps</span>
+          </div>
+          <input type="range" id="kbpsSlider" min="24" max="256" step="8" value="128">
+          <div class="control-scale mono"><span>24</span><span>terrible</span><span>transparent</span><span>256</span></div>
+        </div>
+
+        <div class="control">
+          <div class="control-label">
+            <span>masking margin</span>
+            <span class="control-value mono" id="marginValue">6.0 dB</span>
+          </div>
+          <input type="range" id="marginSlider" min="0" max="16" step="0.5" value="6">
+          <div class="control-scale mono"><span>aggressive</span><span>conservative</span></div>
+        </div>
+
+        <button class="encode-btn" id="encodeBtn">
+          <span id="encodeBtnLabel">run the codec</span>
+        </button>
+      </div>
+
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <span class="progress-label mono" id="progressLabel">transforming…</span>
+      </div>
+
+      <div class="results" id="results" hidden>
+
+        <div class="stat-row">
+          <div class="stat">
+            <span class="stat-label">compression</span>
+            <span class="stat-value mono" id="statRatio">–</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">signal-to-noise</span>
+            <span class="stat-value mono" id="statSnr">–</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">est. size</span>
+            <span class="stat-value mono" id="statSize">–</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">encode time</span>
+            <span class="stat-value mono" id="statTime">–</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-eyebrow">01 · listen</span>
+            <h3>Original vs. reconstructed</h3>
+          </div>
+          <div class="ab-players">
+            <div class="player">
+              <span class="player-label">original</span>
+              <audio id="audioOriginal" controls></audio>
+            </div>
+            <div class="player">
+              <span class="player-label">decoded</span>
+              <audio id="audioDecoded" controls></audio>
+              <a class="download-link" id="downloadLink" download="decoded.wav">download wav</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-eyebrow">02 · waveform</span>
+            <h3>Where the reconstruction departs from the original</h3>
+          </div>
+          <canvas id="waveCanvas" class="wave-canvas"></canvas>
+          <div class="legend">
+            <span><i class="swatch swatch-orig"></i>original</span>
+            <span><i class="swatch swatch-decoded"></i>decoded</span>
+            <span class="legend-note">overlapping regions blend to cream — pure cyan or amber means the traces disagree there</span>
+          </div>
+
+          <div class="subpanel-head">
+            <span class="subpanel-label mono" id="errorAmpLabel">difference, amplified —</span>
+          </div>
+          <canvas id="errorCanvas" class="wave-canvas error-canvas"></canvas>
+          <div class="legend">
+            <span><i class="swatch swatch-error"></i>original − decoded, scaled up so it's actually visible</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-eyebrow">03 · the bit budget, visualized</span>
+            <h3>Every band, every frame — bright means bits were spent, dark means the masking model cut it for free</h3>
+          </div>
+          <canvas id="heatCanvas" class="heat-canvas"></canvas>
+          <div class="legend">
+            <span class="freq-lo">low frequency</span>
+            <span class="heat-scale" aria-hidden="true"></span>
+            <span class="freq-hi">high frequency</span>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </section>
+
+  <section class="how">
+    <div class="how-inner">
+      <p class="eyebrow">how it actually works</p>
+      <h2>Five steps, in order</h2>
+      <ol class="pipeline">
+        <li>
+          <span class="pipeline-num mono">01</span>
+          <div>
+            <h4>MDCT</h4>
+            <p>Audio is split into overlapping windows and converted from a waveform into frequency lines using the Modified Discrete Cosine Transform — the same transform at the heart of MP3, AAC, and Vorbis.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pipeline-num mono">02</span>
+          <div>
+            <h4>Bark-scale masking model</h4>
+            <p>Frequency lines are grouped into critical bands spaced the way your cochlea actually resolves pitch. A loud band spreads a "masking shadow" onto its neighbors — sounds under that shadow become inaudible.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pipeline-num mono">03</span>
+          <div>
+            <h4>Threshold of hearing</h4>
+            <p>Even with no masking at all, extremely quiet or extremely high/low frequencies are floored against the absolute threshold of human hearing — no point spending bits below what anyone could ever hear.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pipeline-num mono">04</span>
+          <div>
+            <h4>Greedy bit allocation</h4>
+            <p>Bits are the scarce resource. Each one buys about 6 dB of extra precision. The allocator keeps handing the next bit to whichever band is currently the most audible above its masking threshold.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pipeline-num mono">05</span>
+          <div>
+            <h4>Quantize &amp; reconstruct</h4>
+            <p>Each band is rounded to its allotted precision — coarse where masking hides it, fine where your ear would catch it — then the inverse transform overlaps everything back into audio.</p>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="honesty">
+    <div class="honesty-inner">
+      <p class="eyebrow">what this is (and isn't)</p>
+      <p>
+        This demo runs the full DSP pipeline for real, in your browser, on your audio — nothing here is precomputed or faked.
+        For speed inside a browser tab it processes the first 15 seconds of whatever you drop in, and it skips a few things
+        production codecs add: entropy coding on top of the quantized values, block-size switching for transients, and
+        per-band tonality analysis. The transform and the masking model — the perceptually interesting parts — are real.
+        <a href="https://github.com/Abhigyanv23/Perceptual-Audio-Codec" target="_blank" rel="noopener">The full Python
+        version</a> in this repo includes a real bitstream format you can actually decode a file from.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <span class="mono">Perceptual-Audio-Codec</span>
+  <span>MDCT · Bark-scale masking · greedy bit allocation — all running client-side, no server involved.</span>
+</footer>
+
+<script src="js/app.js"></script>
+</body>
+</html>
